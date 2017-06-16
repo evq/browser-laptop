@@ -230,14 +230,27 @@ module.exports.cleanPerWindowData = (perWindowData, isShutdown) => {
   // Clean closed frame data before frames because the keys are re-ordered
   // and the new next key is calculated in windowStore.js based on
   // the max frame key ID.
+  var activeFrameIsClosed = false
   if (perWindowData.closedFrames) {
-    perWindowData.closedFrames.forEach(cleanFrame)
+    perWindowData.closedFrames.forEach((frame) => {
+      cleanFrame(frame)
+      if (frame.key === perWindowData.activeFrameKey) {
+        activeFrameIsClosed = true
+      }
+    })
   }
   if (perWindowData.frames) {
     // Don't restore pinned locations because they will be auto created by the app state change event
     perWindowData.frames = perWindowData.frames
       .filter((frame) => !frame.pinnedLocation)
     perWindowData.frames.forEach(cleanFrame)
+    if (activeFrameIsClosed) {
+      perWindowData.activeFrameKey = newKey // Reset the active frame back to the last open frame
+    }
+  } else {
+    if (activeFrameIsClosed) {
+      perWindowData.activeFrameKey = 0 // Reset the active frame FIXME?
+    }
   }
 }
 
@@ -560,8 +573,25 @@ module.exports.loadAppState = () => {
     if (loaded) {
       data = module.exports.runPreMigrations(data)
 
+      var activeFrameIsClosed = false
+      if (data.perWindowState) {
+        data.perWindowState.some((perWindowData) => {
+          if (perWindowData.closedFrames) {
+            perWindowData.closedFrames.some((frame) => {
+              if (frame.key === perWindowData.activeFrameKey) {
+                activeFrameIsClosed = true
+                return true
+              }
+            })
+            if (activeFrameIsClosed) {
+              return true
+            }
+          }
+        })
+      }
+
       // Clean app data here if it wasn't cleared on shutdown
-      if (data.cleanedOnShutdown !== true || data.lastAppVersion !== app.getVersion()) {
+      if (data.cleanedOnShutdown !== true || data.lastAppVersion !== app.getVersion() || activeFrameIsClosed) {
         data = module.exports.cleanAppData(data, false)
       }
       data = Object.assign(module.exports.defaultAppState(), data)
